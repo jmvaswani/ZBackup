@@ -3,6 +3,8 @@ package upload
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"io"
 	"log"
@@ -11,9 +13,12 @@ import (
 	"strings"
 	"sync"
 
+	// "github.com/jmvaswani/zbackup/common/constants"
+
 	uploadpb "github.com/jmvaswani/zbackup/client/pkg/proto"
+	"github.com/jmvaswani/zbackup/common/constants"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 func NewFileUploadClient(addr string, batchSize int, baseDirectory string) ClientService {
@@ -25,7 +30,7 @@ func NewFileUploadClient(addr string, batchSize int, baseDirectory string) Clien
 	}
 	log.Println("Finished preparing Checksum Cache")
 	checksumCache.Range(func(key, value any) bool {
-		log.Printf("File : %s, checksum : %s",key,value)
+		log.Printf("File : %s, checksum : %s", key, value)
 		return true
 	})
 
@@ -39,16 +44,41 @@ func NewFileUploadClient(addr string, batchSize int, baseDirectory string) Clien
 
 type ClientService struct {
 	uploadInProgress sync.Mutex
-	checksumCache *sync.Map
-	addr          string
-	conn          *grpc.ClientConn
-	batchSize     int
-	client        uploadpb.FileServiceClient
+	checksumCache    *sync.Map
+	addr             string
+	conn             *grpc.ClientConn
+	batchSize        int
+	client           uploadpb.FileServiceClient
 }
 
 func (s *ClientService) Connect() error {
 	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	certDir := os.Getenv(constants.CertificateDirectoryEnvVariable)
+	clientCrtLocation := path.Join(certDir, "client.crt")
+	clientKeyLocation := path.Join(certDir, "client.key")
+	caLocation := path.Join(certDir, "CA.crt")
+
+	clientKeyPair, err := tls.LoadX509KeyPair(clientCrtLocation, clientKeyLocation)
+	if err != nil {
+		log.Fatalf("Failed to read Client certs -> %s", err.Error())
+	}
+
+	caCertPool := x509.NewCertPool()
+	ca, err := os.ReadFile(caLocation)
+	if err != nil {
+		log.Fatalf("Failed to read CA cert -> %s", err.Error())
+	}
+
+	caCertPool.AppendCertsFromPEM(ca)
+
+	tlsConfig := tls.Config{
+		Certificates: []tls.Certificate{clientKeyPair},
+		RootCAs:      caCertPool,
+		ServerName:   os.Getenv(constants.ServerNameEnvVariable),
+	}
+	creds := credentials.NewTLS(&tlsConfig)
+	opts = append(opts, grpc.WithTransportCredentials(creds))
 	conn, err := grpc.NewClient(s.addr, opts...)
 	s.conn = conn
 	s.client = uploadpb.NewFileServiceClient(s.conn)
@@ -63,12 +93,12 @@ func (s *ClientService) UploadFile(ctx context.Context, cancel context.CancelFun
 	s.uploadInProgress.Lock()
 	defer s.uploadInProgress.Unlock()
 	fileChecksum := GetFileChecksum(filePath)
-	storedFileChecksum,ok := s.checksumCache.Load(filePath)
+	storedFileChecksum, ok := s.checksumCache.Load(filePath)
 	if ok && fileChecksum == storedFileChecksum {
-		log.Printf("Duplicate call made for file : %s , Checksum : %s . Ignoring.. \n",filePath,fileChecksum)
+		log.Printf("Duplicate call made for file : %s , Checksum : %s . Ignoring.. \n", filePath, fileChecksum)
 		return nil
 	}
-	log.Printf("Beginning upload of file %s to GRPC server \n",filePath)
+	log.Printf("Beginning upload of file %s to GRPC server \n", filePath)
 	stream, err := s.client.Upload(ctx)
 
 	parts := strings.Split(filePath, "/")
@@ -107,14 +137,13 @@ func (s *ClientService) UploadFile(ctx context.Context, cancel context.CancelFun
 	}
 	log.Printf("Sent - %v bytes - %s\n", res.GetSize(), res.GetFileName())
 
-	s.checksumCache.Store(filePath,fileChecksum)
+	s.checksumCache.Store(filePath, fileChecksum)
 	cancel()
 	return nil
 }
 
 func prepareChecksumMap(directory string) (*sync.Map, error) {
-	var checkSumMap  sync.Map
-	
+	var checkSumMap sync.Map
 
 	contents, err := os.ReadDir(directory)
 	if err != nil {
@@ -131,7 +160,7 @@ func prepareChecksumMap(directory string) (*sync.Map, error) {
 			}
 
 			recurseContents.Range(func(item, checkSum any) bool {
-				checkSumMap.Store(item,checkSum)
+				checkSumMap.Store(item, checkSum)
 				return true
 			})
 			// for item, checkSum := range recurseContents.Range() {
@@ -140,7 +169,7 @@ func prepareChecksumMap(directory string) (*sync.Map, error) {
 		} else {
 			absoluteFilePath := path.Join(directory, content.Name())
 			fileHash := GetFileChecksum(absoluteFilePath)
-			checkSumMap.Store(absoluteFilePath,fileHash)
+			checkSumMap.Store(absoluteFilePath, fileHash)
 			// checkSumMap[absoluteFilePath] = fileHash
 		}
 
