@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -87,6 +88,10 @@ func (s *ClientService) Connect() error {
 
 func (s *ClientService) Close() error {
 	return s.conn.Close()
+}
+
+func (s *ClientService) InitiateFileUpload(filePath string) error {
+	return s.UploadFile(context.Background(), func() { fmt.Printf("Cancel called for %s", filePath) }, filePath)
 }
 
 func (s *ClientService) UploadFile(ctx context.Context, cancel context.CancelFunc, filePath string) error {
