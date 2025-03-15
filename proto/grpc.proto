@@ -3,15 +3,35 @@ package proto;
 option go_package = "./;uploadpb";
 
 
-
 message FileUploadRequest {
-    string file_name = 1;
+    string agnosticFilePath = 1;
     bytes chunk = 2;
 }
 message FileUploadResponse {
-  string file_name = 1;
+  string agnosticFilePath = 1;
   uint32 size = 2;
 }
+
+message FileDownloadRequest {
+    string agnosticFilePath = 1;
+  }
+  message FileDownloadResponse {
+    bytes chunk = 2;
+}
+message GetMetaDataMapRequest {
+}
+
+message FileMetaData{
+  string fileCheckSum = 1;
+  string LastModified = 2;
+}
+
+message GetMetaDataMapResponse {
+  map<string,FileMetaData> metaDataMap = 1;
+}
+
 service FileService {
    rpc Upload(stream FileUploadRequest) returns(FileUploadResponse);
+   rpc Download(FileDownloadRequest) returns(stream FileDownloadResponse);
+   rpc GetMetaDataMap(GetMetaDataMapRequest) returns(GetMetaDataMapResponse);
 }

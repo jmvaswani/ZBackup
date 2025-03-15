@@ -19,7 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	FileService_Upload_FullMethodName = "/proto.FileService/Upload"
+	FileService_Upload_FullMethodName         = "/proto.FileService/Upload"
+	FileService_Download_FullMethodName       = "/proto.FileService/Download"
+	FileService_GetMetaDataMap_FullMethodName = "/proto.FileService/GetMetaDataMap"
 )
 
 // FileServiceClient is the client API for FileService service.
@@ -27,6 +29,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type FileServiceClient interface {
 	Upload(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[FileUploadRequest, FileUploadResponse], error)
+	Download(ctx context.Context, in *FileDownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileDownloadResponse], error)
+	GetMetaDataMap(ctx context.Context, in *GetMetaDataMapRequest, opts ...grpc.CallOption) (*GetMetaDataMapResponse, error)
 }
 
 type fileServiceClient struct {
@@ -50,11 +54,42 @@ func (c *fileServiceClient) Upload(ctx context.Context, opts ...grpc.CallOption)
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type FileService_UploadClient = grpc.ClientStreamingClient[FileUploadRequest, FileUploadResponse]
 
+func (c *fileServiceClient) Download(ctx context.Context, in *FileDownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileDownloadResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &FileService_ServiceDesc.Streams[1], FileService_Download_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[FileDownloadRequest, FileDownloadResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type FileService_DownloadClient = grpc.ServerStreamingClient[FileDownloadResponse]
+
+func (c *fileServiceClient) GetMetaDataMap(ctx context.Context, in *GetMetaDataMapRequest, opts ...grpc.CallOption) (*GetMetaDataMapResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMetaDataMapResponse)
+	err := c.cc.Invoke(ctx, FileService_GetMetaDataMap_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FileServiceServer is the server API for FileService service.
 // All implementations must embed UnimplementedFileServiceServer
 // for forward compatibility.
 type FileServiceServer interface {
 	Upload(grpc.ClientStreamingServer[FileUploadRequest, FileUploadResponse]) error
+	Download(*FileDownloadRequest, grpc.ServerStreamingServer[FileDownloadResponse]) error
+	GetMetaDataMap(context.Context, *GetMetaDataMapRequest) (*GetMetaDataMapResponse, error)
 	mustEmbedUnimplementedFileServiceServer()
 }
 
@@ -67,6 +102,12 @@ type UnimplementedFileServiceServer struct{}
 
 func (UnimplementedFileServiceServer) Upload(grpc.ClientStreamingServer[FileUploadRequest, FileUploadResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Upload not implemented")
+}
+func (UnimplementedFileServiceServer) Download(*FileDownloadRequest, grpc.ServerStreamingServer[FileDownloadResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method Download not implemented")
+}
+func (UnimplementedFileServiceServer) GetMetaDataMap(context.Context, *GetMetaDataMapRequest) (*GetMetaDataMapResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMetaDataMap not implemented")
 }
 func (UnimplementedFileServiceServer) mustEmbedUnimplementedFileServiceServer() {}
 func (UnimplementedFileServiceServer) testEmbeddedByValue()                     {}
@@ -96,18 +137,57 @@ func _FileService_Upload_Handler(srv interface{}, stream grpc.ServerStream) erro
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type FileService_UploadServer = grpc.ClientStreamingServer[FileUploadRequest, FileUploadResponse]
 
+func _FileService_Download_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(FileDownloadRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(FileServiceServer).Download(m, &grpc.GenericServerStream[FileDownloadRequest, FileDownloadResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type FileService_DownloadServer = grpc.ServerStreamingServer[FileDownloadResponse]
+
+func _FileService_GetMetaDataMap_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMetaDataMapRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FileServiceServer).GetMetaDataMap(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FileService_GetMetaDataMap_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FileServiceServer).GetMetaDataMap(ctx, req.(*GetMetaDataMapRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // FileService_ServiceDesc is the grpc.ServiceDesc for FileService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var FileService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "proto.FileService",
 	HandlerType: (*FileServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetMetaDataMap",
+			Handler:    _FileService_GetMetaDataMap_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Upload",
 			Handler:       _FileService_Upload_Handler,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "Download",
+			Handler:       _FileService_Download_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "proto/grpc.proto",
